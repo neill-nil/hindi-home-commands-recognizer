@@ -1,0 +1,6 @@
+torch
+transformers
+librosa
+soundfile
+streamlit
+streamlit-mic-recorder
