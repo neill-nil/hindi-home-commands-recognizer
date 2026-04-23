@@ -1,0 +1,26 @@
+# Core ML / ASR
+openai-whisper>=20231117
+torch>=2.0.0         
+
+# Audio Classification (No Whisper)
+scikit-learn>=1.3.0
+librosa>=0.10.1
+joblib>=1.3.2
+
+# Streamlit app
+streamlit>=1.32.0
+
+# Audio I/O
+sounddevice>=0.4.6
+soundfile>=0.12.1
+numpy>=1.24.0
+
+# HuggingFace dataset access
+datasets>=2.18.0
+huggingface_hub>=0.22.0
+
+# Fuzzy string matching (fallback matcher)
+rapidfuzz>=3.6.0
+
+# Utilities
+tqdm>=4.66.0

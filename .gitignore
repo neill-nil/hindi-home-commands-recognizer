@@ -1,0 +1,21 @@
+# Python Virtual Environments
+venv/
+env/
+.venv/
+smai-3/
+
+# Python Cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Project Data (don't push raw audio files or models)
+data/indicvoices_hindi/
+data/self_recorded/
+evaluation_results.json
+
+# Local Streamlit config / secrets
+.streamlit/
+
+# OS specific
+.DS_Store
