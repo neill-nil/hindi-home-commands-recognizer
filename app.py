@@ -23,6 +23,7 @@ import tempfile
 import config
 from src.transcribe import transcribe
 from src.matcher import match_command
+from src.audio_pipeline import predict_audio_direct, predict_from_file_direct, load_models
 
 # PortAudio / sounddevice is optional — needed only for mic recording
 try:
@@ -152,6 +153,13 @@ st.markdown(
 
 st.markdown("---")
 
+# ── Dynamic Pipeline Switch ──────────────────────────────────────────────────
+USE_ML = load_models()
+if USE_ML:
+    st.info("🚀 **Direct Audio ML Model is Active!** Bypassing Whisper for high-speed custom recognition.")
+else:
+    st.info("🐢 **Using Whisper-tiny string-matching.** Train the MFCC audio classifier for 95%+ accuracy!")
+
 # ── Command reference card ─────────────────────────────────────────────────────
 with st.expander("📋 Available Commands (click to expand)"):
     cols = st.columns(4)
@@ -206,6 +214,14 @@ def record_and_predict():
     )
 
     audio_flat = audio.flatten()
+
+    # If ML model is trained, use it directly!
+    if USE_ML:
+        result = predict_audio_direct(audio_flat, SAMPLE_RATE)
+        st.session_state.last_result = result
+        st.session_state.last_transcript = result["transcript"]
+        status_placeholder.empty()
+        return result
 
     # Save to temp file for Whisper
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -284,14 +300,26 @@ if uploaded:
 
     st.audio(uploaded)
 
-    with st.spinner("Transcribing …"):
-        transcript = transcribe(tmp_path)
-    os.unlink(tmp_path)
+    if USE_ML:
+        with st.spinner("Classifying audio directly ..."):
+            result = predict_from_file_direct(tmp_path)
+            cmd    = result["command"]
+            info   = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
+            conf   = result.get("confidence", 0.0)
+            transcript = result["transcript"]
+    else:
+        with st.spinner("Transcribing …"):
+            transcript = transcribe(tmp_path)
+        
+        result = match_command(transcript)
+        cmd    = result["command"]
+        info   = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
+        conf   = result.get("confidence", 0.0)
 
-    result = match_command(transcript)
-    cmd    = result["command"]
-    info   = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
-    conf   = result.get("confidence", 0.0)
+    try:
+        os.unlink(tmp_path)
+    except:
+        pass
 
     st.markdown(
         f"<div class='transcript-box'>🗣️&nbsp;&nbsp;<em>{transcript}</em></div>",
