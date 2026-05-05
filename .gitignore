@@ -11,7 +11,7 @@ __pycache__/
 
 # Project Data (don't push raw audio files or models)
 data/indicvoices_hindi/
-data/self_recorded/
+# data/self_recorded/
 evaluation_results.json
 
 # Local Streamlit config / secrets
