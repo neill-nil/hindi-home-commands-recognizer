@@ -14,44 +14,53 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 
-_model = None  # Module-level cache — load once, reuse many times
+from pathlib import Path
 
+_model = None  # Module-level cache — load once, reuse many times
+_is_hf_model = False
 
 def _get_model():
-    """Lazy-load Whisper model (downloads ~150 MB on first run, cached after)."""
-    global _model
+    """Lazy-load Whisper model. Prefers local HF finetuned model if present."""
+    global _model, _is_hf_model
     if _model is None:
-        print(f"[transcribe] Loading Whisper-{config.WHISPER_MODEL_SIZE} model …", flush=True)
-        _model = whisper.load_model(config.WHISPER_MODEL_SIZE)
+        finetuned_path = Path(config.BASE_DIR) / "models" / "whisper_finetuned"
+        if finetuned_path.exists():
+            print(f"[transcribe] Loading FINE-TUNED HuggingFace model from {finetuned_path}...", flush=True)
+            from transformers import pipeline
+            # Using CPU/MPS automatically mapped by HF pipeline
+            _model = pipeline("automatic-speech-recognition", model=str(finetuned_path))
+            _is_hf_model = True
+        else:
+            print(f"[transcribe] Loading base openai/Whisper-{config.WHISPER_MODEL_SIZE} model...", flush=True)
+            _model = whisper.load_model(config.WHISPER_MODEL_SIZE)
+            _is_hf_model = False
         print("[transcribe] Model ready.", flush=True)
     return _model
-
 
 def transcribe(audio_path: str) -> str:
     """
     Transcribe an audio file to Hindi text.
-
-    Args:
-        audio_path: Absolute or relative path to a WAV/MP3/M4A file.
-
-    Returns:
-        Transcribed Hindi text string (may be empty if audio is silent/unintelligible).
     """
     if not os.path.isfile(audio_path):
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
     model = _get_model()
 
-    # Force language=Hindi and suppress other-language fallback
-    result = model.transcribe(
-        audio_path,
-        language=config.WHISPER_LANGUAGE,
-        task="transcribe",
-        fp16=False,          # CPU-safe
-        verbose=False,
-    )
+    if _is_hf_model:
+        # Generate transcription using HF pipeline
+        result = model(audio_path, generate_kwargs={"language": "hi", "task": "transcribe"})
+        transcript = result["text"].strip()
+    else:
+        # Force language=Hindi and suppress other-language fallback
+        result = model.transcribe(
+            audio_path,
+            language=config.WHISPER_LANGUAGE,
+            task="transcribe",
+            fp16=False,          # CPU-safe
+            verbose=False,
+        )
+        transcript = result["text"].strip()
 
-    transcript = result["text"].strip()
     return transcript
 
 
