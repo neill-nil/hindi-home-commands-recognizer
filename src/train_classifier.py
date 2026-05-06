@@ -49,31 +49,35 @@ def main():
     print("       Training Direct Audio Classifier (MFCCs)")
     print("="*60)
     
-    data_dir = Path(config.SELF_RECORDED_DIR)
-    if not data_dir.exists():
-        print(f"Error: Directory not found - {data_dir}")
-        print("Please record your clips first!")
-        sys.exit(1)
+    data_dirs = [
+        Path(config.SELF_RECORDED_DIR),
+        Path(config.MINED_LOCAL_FLEURS_DIR)
+    ]
 
     X = []
     y = []
     
-    print("Extracting features from self_recorded folder...")
-    
-    for label_dir in data_dir.iterdir():
-        if not label_dir.is_dir():
+    for data_dir in data_dirs:
+        if not data_dir.exists():
+            print(f"Warning: Directory not found - {data_dir}")
             continue
-            
-        label = label_dir.name
-        if label not in config.COMMANDS:
-            continue
-            
-        audio_files = list(label_dir.glob("*.wav"))
-        for file in audio_files:
-            features = extract_features(str(file))
-            if features is not None:
-                X.append(features)
-                y.append(label)
+
+        print(f"Extracting features from {data_dir.name} folder...")
+        
+        for label_dir in data_dir.iterdir():
+            if not label_dir.is_dir():
+                continue
+                
+            label = label_dir.name
+            if label not in config.COMMANDS:
+                continue
+                
+            audio_files = list(label_dir.glob("*.wav"))
+            for file in audio_files:
+                features = extract_features(str(file))
+                if features is not None:
+                    X.append(features)
+                    y.append(label)
                 
     if not X:
         print("No audio data found! Record clips first.")

@@ -11,6 +11,10 @@ __pycache__/
 
 # Project Data (don't push raw audio files or models)
 data/indicvoices_hindi/
+data/train
+train.tsv
+data/mined_local_fleurs
+models/
 # data/self_recorded/
 evaluation_results.json
 
