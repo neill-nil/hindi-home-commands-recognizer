@@ -49,8 +49,8 @@ CANONICAL_PHRASES = {
 # Structure: {command_label: ([device_keywords], [state_keywords])}
 # A command matches if ≥1 device keyword AND ≥1 state keyword appear in transcript.
 KEYWORD_MAP = {
-    "light_on":  (["लाइट", "light", "बत्ती", "दीपक"],       ["चालू", "on", "जलाओ", "खोलो", "शुरू"]),
-    "light_off": (["लाइट", "light", "बत्ती", "दीपक"],       ["बंद", "off", "बुझाओ"]),
+    "light_on":  (["बत्ती", "batti", "लाइट", "light",  "दीपक"],        ["चालू", "on", "जलाओ", "खोलो", "शुरू"]),
+    "light_off": (["बत्ती", "batti", "लाइट", "light",  "दीपक"],        ["बंद", "off", "बुझाओ"]),
     "fan_on":    (["पंखा", "fan", "पंखे"],                  ["चालू", "on", "चलाओ", "खोलो", "शुरू"]),
     "fan_off":   (["पंखा", "fan", "पंखे"],                  ["बंद", "off"]),
     "ac_on":     (["ac", "AC", "एसी", "एयर कंडीशनर"],       ["चालू", "on", "खोलो", "शुरू"]),
@@ -66,15 +66,15 @@ FUZZY_THRESHOLD = 60   # rapidfuzz score 0–100; below this → "unknown"
 
 # ── UI display settings ────────────────────────────────────────────────────────
 COMMAND_DISPLAY = {
-    "light_on":  {"emoji": "💡", "label": "Light ON",  "color": "#f0c040"},
-    "light_off": {"emoji": "🔦", "label": "Light OFF", "color": "#555555"},
-    "fan_on":    {"emoji": "🌀", "label": "Fan ON",    "color": "#40a0f0"},
-    "fan_off":   {"emoji": "🛑", "label": "Fan OFF",   "color": "#555555"},
-    "ac_on":     {"emoji": "❄️",  "label": "AC ON",    "color": "#00cfff"},
-    "ac_off":    {"emoji": "🔥", "label": "AC OFF",    "color": "#555555"},
-    "tv_on":     {"emoji": "📺", "label": "TV ON",     "color": "#a060f0"},
-    "tv_off":    {"emoji": "⏹️",  "label": "TV OFF",   "color": "#555555"},
-    "music_on":  {"emoji": "🎵", "label": "Music ON",  "color": "#ff3366"},
-    "music_off": {"emoji": "🔇", "label": "Music OFF", "color": "#555555"},
-    "unknown":   {"emoji": "❓", "label": "Unknown",   "color": "#ff4444"},
+    "light_on":  {"emoji": "💡", "label": "Light ON",  "color": "#64748b"},
+    "light_off": {"emoji": "🔦", "label": "Light OFF", "color": "#94a3b8"},
+    "fan_on":    {"emoji": "🌀", "label": "Fan ON",    "color": "#64748b"},
+    "fan_off":   {"emoji": "🛑", "label": "Fan OFF",   "color": "#94a3b8"},
+    "ac_on":     {"emoji": "❄️",  "label": "AC ON",    "color": "#64748b"},
+    "ac_off":    {"emoji": "🔥", "label": "AC OFF",    "color": "#94a3b8"},
+    "tv_on":     {"emoji": "📺", "label": "TV ON",     "color": "#64748b"},
+    "tv_off":    {"emoji": "⏹️",  "label": "TV OFF",   "color": "#94a3b8"},
+    "music_on":  {"emoji": "🎵", "label": "Music ON",  "color": "#64748b"},
+    "music_off": {"emoji": "🔇", "label": "Music OFF", "color": "#94a3b8"},
+    "unknown":   {"emoji": "❓", "label": "Unknown",   "color": "#ef4444"},
 }
