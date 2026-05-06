@@ -1,119 +1,126 @@
 """
-train_classifier.py — Train a traditional ML classifier on MFCC audio features.
+src/train_classifier.py — Train audio classifier with richer features.
 
-This completely bypasses Whisper and trains specifically on your team's voices.
-It extracts MFCCs from `data/self_recorded` and trains a Random Forest classifier.
+Reads data/self_recorded/<command>/*.wav, extracts MFCC+delta+chroma features,
+trains a Gradient Boosting + SVM ensemble, evaluates with cross-validation.
 
 Usage:
-    python src/train_classifier.py
+    python3 src/train_classifier.py
 """
 
-import os
-import sys
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 import numpy as np
-import librosa
 import joblib
 from pathlib import Path
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+from collections import Counter
+
 from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import GradientBoostingClassifier, VotingClassifier
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.metrics import classification_report, accuracy_score
+from sklearn.calibration import CalibratedClassifierCV
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
+from src.features import extract_features_from_file, CLIP_DURATION
 
-def extract_features(audio_path, sr=16000):
-    """
-    Load an audio file and extract its mean MFCC features.
-    """
-    try:
-        y, _ = librosa.load(audio_path, sr=sr)
-        
-        # If audio is empty or too short
-        if len(y) == 0:
-            return None
-            
-        # Extract 40 MFCCs
-        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
-        
-        # Average across the time axis to get a 1D feature vector for the whole clip
-        mfccs_mean = np.mean(mfccs.T, axis=0)
-        return mfccs_mean
-    except Exception as e:
-        print(f"Error processing {audio_path}: {e}")
-        return None
+AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac"}
+MODEL_DIR  = Path(config.BASE_DIR) / "models"
+
+
+def load_dataset():
+    """Load all self-recorded clips and extract features."""
+    data_dir = Path(config.SELF_RECORDED_DIR)
+    X, y = [], []
+
+    print(f"\nLoading clips from: {data_dir}")
+    print(f"  Clip duration (pad/trim): {CLIP_DURATION}s\n")
+
+    per_class = Counter()
+    for label_dir in sorted(data_dir.iterdir()):
+        if not label_dir.is_dir() or label_dir.name not in config.COMMANDS:
+            continue
+        for f in sorted(label_dir.glob("*")):
+            if f.suffix.lower() not in AUDIO_EXTS:
+                continue
+            feats = extract_features_from_file(str(f))
+            if feats is not None:
+                X.append(feats)
+                y.append(label_dir.name)
+                per_class[label_dir.name] += 1
+
+    for cmd in config.COMMANDS:
+        n = per_class.get(cmd, 0)
+        status = "✓" if n > 0 else "✗ MISSING"
+        print(f"  {status}  {cmd:<15}  {n} clips")
+
+    return np.array(X), np.array(y)
+
 
 def main():
-    print("="*60)
-    print("       Training Direct Audio Classifier (MFCCs)")
-    print("="*60)
-    
-    data_dir = Path(config.SELF_RECORDED_DIR)
-    if not data_dir.exists():
-        print(f"Error: Directory not found - {data_dir}")
-        print("Please record your clips first!")
+    print("=" * 60)
+    print("   Audio Classifier Training — Rich Feature Edition")
+    print("=" * 60)
+
+    X, y = load_dataset()
+    if len(X) == 0:
+        print("\nNo data found! Record clips first with data/record_audio.py")
         sys.exit(1)
 
-    X = []
-    y = []
-    
-    print("Extracting features from self_recorded folder...")
-    
-    for label_dir in data_dir.iterdir():
-        if not label_dir.is_dir():
-            continue
-            
-        label = label_dir.name
-        if label not in config.COMMANDS:
-            continue
-            
-        audio_files = list(label_dir.glob("*.wav"))
-        for file in audio_files:
-            features = extract_features(str(file))
-            if features is not None:
-                X.append(features)
-                y.append(label)
-                
-    if not X:
-        print("No audio data found! Record clips first.")
-        sys.exit(1)
-        
-    X = np.array(X)
-    y = np.array(y)
-    print(f"\nExtracted features from {len(X)} clips across {len(set(y))} classes.")
+    print(f"\nTotal: {len(X)} clips  ·  Feature dim: {X.shape[1]}\n")
 
-    # Split into train/test
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    
-    # Scale features (very important for SVM / ML models)
+    # Scale features
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    X_scaled = scaler.fit_transform(X)
 
-    # Train a fast SVM or Random Forest
-    print("\nTraining Classifier (SVM)...")
-    clf = SVC(kernel='rbf', probability=True, C=10) # SVM usually does great on MFCCs
-    clf.fit(X_train_scaled, y_train)
+    # ── Cross-validation to check model quality ──────────────────────────────
+    print("Running 5-fold cross-validation …")
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-    # Evaluate
-    print("\nEvaluating on 20% hold-out test set:")
-    y_pred = clf.predict(X_test_scaled)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"Hold-out Accuracy: {acc*100:.1f}%\n")
-    print(classification_report(y_test, y_pred))
+    # SVM with Platt scaling for well-calibrated probabilities
+    svm = CalibratedClassifierCV(
+        SVC(kernel="rbf", C=10, gamma="scale"), cv=3
+    )
+    cv_scores = cross_val_score(svm, X_scaled, y, cv=cv, scoring="accuracy")
+    print(f"  SVM (calibrated) CV accuracy: {cv_scores.mean()*100:.1f}% ± {cv_scores.std()*100:.1f}%")
 
-    # Save models
-    model_dir = Path(config.BASE_DIR) / "models"
-    model_dir.mkdir(exist_ok=True)
-    
-    joblib.dump(clf, model_dir / "audio_svm.pkl")
-    joblib.dump(scaler, model_dir / "audio_scaler.pkl")
-    
-    print("="*60)
-    print(f"Models saved to {model_dir}/")
-    print("They will now be automatically used by the Streamlit App!")
-    print("="*60)
+    gbc = GradientBoostingClassifier(n_estimators=200, learning_rate=0.1,
+                                      max_depth=4, random_state=42)
+    cv_scores_gbc = cross_val_score(gbc, X_scaled, y, cv=cv, scoring="accuracy")
+    print(f"  Gradient Boosting     CV accuracy: {cv_scores_gbc.mean()*100:.1f}% ± {cv_scores_gbc.std()*100:.1f}%")
+
+    # ── Train final ensemble on ALL data ─────────────────────────────────────
+    print("\nTraining final ensemble on all data …")
+    final_svm = CalibratedClassifierCV(SVC(kernel="rbf", C=10, gamma="scale"), cv=3)
+    final_gbc = GradientBoostingClassifier(n_estimators=200, learning_rate=0.1,
+                                           max_depth=4, random_state=42)
+
+    ensemble = VotingClassifier(
+        estimators=[("svm", final_svm), ("gbc", final_gbc)],
+        voting="soft",
+        weights=[1, 1],
+    )
+    ensemble.fit(X_scaled, y)
+
+    # Quick train-set sanity check
+    y_pred = ensemble.predict(X_scaled)
+    print(f"  Train accuracy (sanity): {accuracy_score(y, y_pred)*100:.1f}%")
+
+    print("\nPer-class report (on training data — use CV score for real estimate):")
+    print(classification_report(y, y_pred, target_names=sorted(set(y))))
+
+    # ── Save ─────────────────────────────────────────────────────────────────
+    MODEL_DIR.mkdir(exist_ok=True)
+    joblib.dump(ensemble, MODEL_DIR / "audio_svm.pkl")
+    joblib.dump(scaler,   MODEL_DIR / "audio_scaler.pkl")
+
+    print("=" * 60)
+    print(f"Saved to {MODEL_DIR}/")
+    print(f"Restart the Streamlit app to use the new model.")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     main()

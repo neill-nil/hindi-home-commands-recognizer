@@ -1,20 +1,12 @@
 """
-app.py — Streamlit app for Hindi Smart-Home Command Recognizer (T11.3)
-
-Features:
-  - Hold-to-record button (press and hold, release to transcribe)
-  - Real-time Whisper-tiny transcription
-  - Command prediction via keyword + fuzzy matching
-  - Simulated smart-home action (emoji-based feedback)
-
-Run:
-    streamlit run app.py
+app.py — Hindi Smart-Home Command Recognizer (T11.3)
+Sleek dark UI with live audio playback and ML-first pipeline.
 """
 
-import sys
-import os
+import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import io
 import numpy as np
 import streamlit as st
 import soundfile as sf
@@ -24,8 +16,8 @@ import config
 from src.transcribe import transcribe
 from src.matcher import match_command
 from src.audio_pipeline import predict_audio_direct, predict_from_file_direct, load_models
+from src.whisper_pipeline import predict_whisper, predict_whisper_from_file, load_whisper_model
 
-# PortAudio / sounddevice is optional — needed only for mic recording
 try:
     import sounddevice as sd
     SOUNDDEVICE_AVAILABLE = True
@@ -40,128 +32,191 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
+# ── Premium CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;600&display=swap');
 
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+*, html, body, [class*="css"] {
+    font-family: 'Inter', 'Noto Sans Devanagari', sans-serif;
+    box-sizing: border-box;
+}
 
-/* Dark gradient background */
+/* ── Background ── */
 .stApp {
-    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-    color: #e0e0e0;
+    background: radial-gradient(ellipse at 20% 20%, #1a1040 0%, #0d0d1a 50%, #0a0a0f 100%);
+    min-height: 100vh;
 }
 
-/* Command result card */
-.result-card {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 16px;
-    padding: 24px 32px;
-    margin: 16px 0;
-    backdrop-filter: blur(10px);
-    text-align: center;
+/* ── Hide Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 720px; }
+
+/* ── Headings ── */
+h1 { color: #fff !important; font-weight: 800 !important; letter-spacing: -0.5px; }
+h3 { color: #a78bfa !important; font-weight: 600 !important; font-size: 0.95rem !important;
+     text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.5rem !important; }
+
+/* ── Status pill ── */
+.pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px; border-radius: 999px; font-size: 12px;
+    font-weight: 600; letter-spacing: 0.5px;
+}
+.pill-ml   { background: rgba(52,211,153,0.12); color: #34d399; border: 1px solid rgba(52,211,153,0.25); }
+.pill-whisper { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.25); }
+.pill-dot  { width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+             animation: blink 2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── Record button ── */
+div[data-testid="stButton"] > button {
+    width: 100% !important;
+    padding: 18px 0 !important;
+    font-size: 17px !important;
+    font-weight: 700 !important;
+    border-radius: 16px !important;
+    border: none !important;
+    background: linear-gradient(135deg, #7c3aed, #a855f7, #ec4899) !important;
+    color: white !important;
+    letter-spacing: 0.5px !important;
+    transition: all 0.25s cubic-bezier(.4,0,.2,1) !important;
+    box-shadow: 0 4px 24px rgba(124,58,237,0.35) !important;
+}
+div[data-testid="stButton"] > button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 32px rgba(124,58,237,0.55) !important;
+    filter: brightness(1.08) !important;
+}
+div[data-testid="stButton"] > button:active {
+    transform: translateY(0) !important;
+    filter: brightness(0.95) !important;
 }
 
-.command-emoji { font-size: 72px; line-height: 1; margin-bottom: 8px; }
-.command-label { font-size: 28px; font-weight: 700; letter-spacing: 1px; }
-.command-sub   { font-size: 14px; color: #aaa; margin-top: 4px; }
-
-/* Transcript box */
-.transcript-box {
-    background: rgba(0,0,0,0.3);
-    border-left: 4px solid #6c63ff;
-    border-radius: 8px;
-    padding: 12px 16px;
-    font-size: 18px;
-    color: #e0e0e0;
+/* ── Glass card ── */
+.glass {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 20px;
+    padding: 28px 32px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     margin: 12px 0;
+}
+
+/* ── Result card ── */
+.result-card {
+    display: flex; align-items: center; gap: 20px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 18px; padding: 22px 28px;
+    margin: 10px 0;
+    transition: all 0.3s ease;
+}
+.result-card.success { border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.05); }
+.result-card.error   { border-color: rgba(239,68,68,0.3);  background: rgba(239,68,68,0.05); }
+.result-emoji { font-size: 52px; line-height: 1; flex-shrink: 0; }
+.result-info  { flex: 1; }
+.result-label { font-size: 26px; font-weight: 800; letter-spacing: -0.3px; }
+.result-meta  { font-size: 12px; color: #6b7280; margin-top: 4px; font-family: 'Inter', monospace; }
+
+/* ── Transcript box ── */
+.transcript-box {
+    background: rgba(0,0,0,0.35);
+    border-left: 3px solid #7c3aed;
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 17px;
+    color: #d1d5db;
+    margin: 8px 0;
     font-family: 'Noto Sans Devanagari', 'Inter', sans-serif;
+    line-height: 1.5;
 }
 
-/* Record button styling */
-.stButton > button {
-    width: 100%;
-    padding: 20px 0;
-    font-size: 20px;
-    font-weight: 700;
-    border-radius: 50px;
-    border: none;
-    background: linear-gradient(90deg, #6c63ff, #e040fb);
-    color: white;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    letter-spacing: 1px;
+/* ── Status bar ── */
+.status-bar {
+    text-align: center; padding: 14px;
+    border-radius: 12px; font-weight: 600; font-size: 15px;
+    margin: 8px 0;
 }
-.stButton > button:hover {
-    transform: scale(1.02);
-    box-shadow: 0 4px 20px rgba(108, 99, 255, 0.5);
-}
-.stButton > button:active {
-    transform: scale(0.98);
-    background: linear-gradient(90deg, #e040fb, #6c63ff);
-}
+.status-recording { background: rgba(239,68,68,0.15); color: #f87171;
+    border: 1px solid rgba(239,68,68,0.25); animation: pulse-border 1.2s ease-in-out infinite; }
+.status-processing { background: rgba(124,58,237,0.15); color: #a78bfa;
+    border: 1px solid rgba(124,58,237,0.25); }
+@keyframes pulse-border { 0%,100%{border-color:rgba(239,68,68,0.25)} 50%{border-color:rgba(239,68,68,0.7)} }
 
-/* Section headers */
-h1 { color: #ffffff; text-align: center; }
-h3 { color: #c0b3ff; }
+/* ── Command grid ── */
+.cmd-tile {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px; padding: 14px 8px; text-align: center;
+    transition: all 0.2s ease; cursor: default;
+}
+.cmd-tile:hover { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.4); transform: translateY(-2px); }
+.cmd-emoji { font-size: 26px; margin-bottom: 4px; }
+.cmd-name  { font-size: 11px; font-weight: 700; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.8px; }
+.cmd-hindi { font-size: 11px; color: #6b7280; margin-top: 2px; }
 
-/* Status message */
-.recording-indicator {
-    text-align: center;
-    color: #ff6b6b;
-    font-size: 16px;
-    font-weight: 600;
-    animation: pulse 1s infinite;
-}
-@keyframes pulse {
-    0%   { opacity: 1; }
-    50%  { opacity: 0.4; }
-    100% { opacity: 1; }
-}
+/* ── Divider ── */
+.divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+           margin: 24px 0; }
 
-/* Unknown / error */
-.unknown-card {
-    background: rgba(255, 80, 80, 0.1);
-    border: 1px solid rgba(255, 80, 80, 0.3);
-}
+/* ── Audio player dark override ── */
+audio { filter: invert(0.85) hue-rotate(180deg) !important; border-radius: 8px !important; width: 100% !important; }
+
+/* ── Info/warning overrides ── */
+.stAlert { border-radius: 12px !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-SAMPLE_RATE     = 16000
-MAX_DURATION    = 5      # seconds max recording per press
-CHANNELS        = 1
+SAMPLE_RATE  = 16000
+MAX_DURATION = 4
+CHANNELS     = 1
 
-# ── Session state ─────────────────────────────────────────────────────────────
-if "last_result"     not in st.session_state:
-    st.session_state.last_result = None
-if "last_transcript" not in st.session_state:
-    st.session_state.last_transcript = ""
-if "status_msg"      not in st.session_state:
-    st.session_state.status_msg = ""
+# ── Session state ──────────────────────────────────────────────────────────────
+for key, default in [
+    ("last_result", None),
+    ("last_transcript", ""),
+    ("last_audio_bytes", None),    # WAV bytes of last recording for playback
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-# ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("# 🏠 Hindi Smart-Home Commander")
-st.markdown(
-    "<p style='text-align:center; color:#aaa; margin-top:-12px;'>"
-    "T11.3 · Whisper-tiny + String Match · Zero Training"
-    "</p>",
-    unsafe_allow_html=True,
-)
+# ── Model detection (priority: Whisper fine-tuned > MFCC SVM > Whisper ASR) ──
+USE_WHISPER_FT = load_whisper_model()   # fine-tuned Whisper classifier
+USE_ML         = (not USE_WHISPER_FT) and load_models()  # MFCC SVM fallback
 
-st.markdown("---")
+# ─────────────────────────────────────────────────────────────────────────────
+# HEADER
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("# 🏠 &nbsp;Hindi Smart-Home")
+st.markdown("##### Voice Command Recognizer &nbsp;·&nbsp; T11.3")
 
-# ── Dynamic Pipeline Switch ──────────────────────────────────────────────────
-USE_ML = load_models()
-if USE_ML:
-    st.info("🚀 **Direct Audio ML Model is Active!** Bypassing Whisper for high-speed custom recognition.")
+st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+
+# Status pill
+if USE_WHISPER_FT:
+    st.markdown(
+        "<div class='pill pill-ml'><span class='pill-dot'></span>Whisper Fine-Tuned Classifier Active</div>",
+        unsafe_allow_html=True,
+    )
+elif USE_ML:
+    st.markdown(
+        "<div class='pill pill-ml'><span class='pill-dot'></span>MFCC + SVM Active (train Whisper for better accuracy)</div>",
+        unsafe_allow_html=True,
+    )
 else:
-    st.info("🐢 **Using Whisper-tiny string-matching.** Train the MFCC audio classifier for 95%+ accuracy!")
+    st.markdown(
+        "<div class='pill pill-whisper'><span class='pill-dot'></span>Whisper-base + String Match (no model trained)</div>",
+        unsafe_allow_html=True,
+    )
 
-# ── Command reference card ─────────────────────────────────────────────────────
-with st.expander("📋 Available Commands (click to expand)"):
+st.markdown("")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND GRID
+# ─────────────────────────────────────────────────────────────────────────────
+with st.expander("📋  Available Commands", expanded=False):
     cols = st.columns(4)
     for i, (cmd, info) in enumerate(config.COMMAND_DISPLAY.items()):
         if cmd == "unknown":
@@ -169,176 +224,193 @@ with st.expander("📋 Available Commands (click to expand)"):
         phrase = config.CANONICAL_PHRASES.get(cmd, "")
         with cols[i % 4]:
             st.markdown(
-                f"<div style='text-align:center; padding:8px;'>"
-                f"<div style='font-size:28px'>{info['emoji']}</div>"
-                f"<div style='font-size:12px; font-weight:600; color:#c0b3ff'>{info['label']}</div>"
-                f"<div style='font-size:11px; color:#888;'>{phrase}</div>"
+                f"<div class='cmd-tile'>"
+                f"<div class='cmd-emoji'>{info['emoji']}</div>"
+                f"<div class='cmd-name'>{info['label']}</div>"
+                f"<div class='cmd-hindi'>{phrase}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
 
-st.markdown("---")
+st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
-# ── Recording section ─────────────────────────────────────────────────────────
-st.markdown("### 🎙️ Record a Command")
-st.markdown(
-    "<p style='color:#aaa; font-size:14px;'>"
-    "Click the button, speak your Hindi command clearly, then wait for the result."
-    "</p>",
-    unsafe_allow_html=True,
-)
+# ─────────────────────────────────────────────────────────────────────────────
+# MIC RECORDING
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("### 🎙️  Speak a Command")
 
-status_placeholder  = st.empty()
-result_placeholder  = st.empty()
-transcript_placeholder = st.empty()
+status_ph    = st.empty()
+audio_ph     = st.empty()    # playback player — cleared on new recording
+result_ph    = st.empty()
+transcript_ph = st.empty()
+
+
+def run_prediction(audio_flat: np.ndarray) -> dict:
+    """Priority: Whisper fine-tuned > MFCC SVM > Whisper ASR transcription."""
+    if USE_WHISPER_FT:
+        status_ph.markdown(
+            "<div class='status-bar status-processing'>⚡ Classifying with fine-tuned Whisper …</div>",
+            unsafe_allow_html=True,
+        )
+        return predict_whisper(audio_flat, SAMPLE_RATE)
+    elif USE_ML:
+        status_ph.markdown(
+            "<div class='status-bar status-processing'>⚡ Classifying with MFCC SVM …</div>",
+            unsafe_allow_html=True,
+        )
+        return predict_audio_direct(audio_flat, SAMPLE_RATE)
+    else:
+        # Save to temp for Whisper
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+        sf.write(tmp_path, audio_flat, SAMPLE_RATE)
+        status_ph.markdown(
+            "<div class='status-bar status-processing'>🌀 Transcribing …</div>",
+            unsafe_allow_html=True,
+        )
+        try:
+            transcript = transcribe(tmp_path)
+        finally:
+            try: os.unlink(tmp_path)
+            except: pass
+        result = match_command(transcript)
+        result["transcript"] = transcript
+        return result
 
 
 def record_and_predict():
-    """Record audio, transcribe with Whisper-tiny, predict command."""
-    status_placeholder.markdown(
-        "<div class='recording-indicator'>🔴 Recording … speak now!</div>",
+    # Clear previous result and audio immediately
+    audio_ph.empty()
+    result_ph.empty()
+    transcript_ph.empty()
+
+    status_ph.markdown(
+        "<div class='status-bar status-recording'>🔴 &nbsp;Recording — speak now!</div>",
         unsafe_allow_html=True,
     )
 
-    audio = sd.rec(
-        int(MAX_DURATION * SAMPLE_RATE),
-        samplerate=SAMPLE_RATE,
-        channels=CHANNELS,
-        dtype="float32",
-    )
+    audio = sd.rec(int(MAX_DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE,
+                   channels=CHANNELS, dtype="float32")
     sd.wait()
-
-    status_placeholder.markdown(
-        "<div style='text-align:center; color:#6c63ff;'>⏳ Transcribing …</div>",
-        unsafe_allow_html=True,
-    )
 
     audio_flat = audio.flatten()
 
-    # If ML model is trained, use it directly!
-    if USE_ML:
-        result = predict_audio_direct(audio_flat, SAMPLE_RATE)
-        st.session_state.last_result = result
-        st.session_state.last_transcript = result["transcript"]
-        status_placeholder.empty()
-        return result
+    # Save WAV bytes for playback
+    buf = io.BytesIO()
+    sf.write(buf, audio_flat, SAMPLE_RATE, format="WAV")
+    st.session_state.last_audio_bytes = buf.getvalue()
 
-    # Save to temp file for Whisper
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp_path = tmp.name
-    sf.write(tmp_path, audio_flat, SAMPLE_RATE)
-
-    try:
-        transcript = transcribe(tmp_path)
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-
-    result = match_command(transcript)
-    result["transcript"] = transcript
+    result = run_prediction(audio_flat)
 
     st.session_state.last_result     = result
-    st.session_state.last_transcript = transcript
-    status_placeholder.empty()
-
-    return result
+    st.session_state.last_transcript = result.get("transcript", "")
+    status_ph.empty()
 
 
-# ── Main record button ─────────────────────────────────────────────────────────
+# ── Record button ──────────────────────────────────────────────────────────────
 if not SOUNDDEVICE_AVAILABLE:
-    st.warning(
-        "🎤 **Mic recording unavailable** — PortAudio library not found.\n\n"
-        "Fix: `sudo apt install portaudio19-dev` then restart the app.\n\n"
-        "Meanwhile, use **Upload an Audio File** below to test ↓"
-    )
-elif st.button(f"🎙️  Hold to Record  ({MAX_DURATION}s)"):
-    result = record_and_predict()
+    st.warning("🎤 **Mic unavailable** — run `sudo apt install portaudio19-dev` then restart.\n\nUse the Upload section below ↓")
+elif st.button(f"🎙️  &nbsp; Record  ({MAX_DURATION}s) &nbsp; 🎙️"):
+    record_and_predict()
 
-# ── Result display ─────────────────────────────────────────────────────────────
+# ── Show cached audio + result ─────────────────────────────────────────────────
+if st.session_state.last_audio_bytes:
+    audio_ph.audio(st.session_state.last_audio_bytes, format="audio/wav")
+
 if st.session_state.last_result:
-    res   = st.session_state.last_result
-    cmd   = res["command"]
-    info  = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
-    conf  = res.get("confidence", 0.0)
+    res    = st.session_state.last_result
+    cmd    = res["command"]
+    info   = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
+    conf   = res.get("confidence", 0.0)
     method = res.get("method", "")
 
-    # Transcript box
-    if st.session_state.last_transcript:
-        transcript_placeholder.markdown(
-            f"<div class='transcript-box'>"
-            f"🗣️&nbsp;&nbsp;<em>{st.session_state.last_transcript}</em>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    # Result card
-    extra_class = "unknown-card" if cmd == "unknown" else ""
-    result_placeholder.markdown(
-        f"<div class='result-card {extra_class}'>"
-        f"<div class='command-emoji'>{info['emoji']}</div>"
-        f"<div class='command-label' style='color:{info['color']};'>{info['label']}</div>"
-        f"<div class='command-sub'>Confidence: {conf*100:.0f}%  ·  Method: {method}</div>"
+    card_class = "success" if cmd != "unknown" else "error"
+    color = info["color"]
+    result_ph.markdown(
+        f"<div class='result-card {card_class}'>"
+        f"  <div class='result-emoji'>{info['emoji']}</div>"
+        f"  <div class='result-info'>"
+        f"    <div class='result-label' style='color:{color};'>{info['label']}</div>"
+        f"    <div class='result-meta'>Confidence: {conf*100:.0f}% &nbsp;·&nbsp; Method: {method}</div>"
+        f"  </div>"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-# ── File upload fallback ──────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown("### 📂 Or Upload an Audio File")
+    if st.session_state.last_transcript and not USE_ML:
+        transcript_ph.markdown(
+            f"<div class='transcript-box'>🗣️ &nbsp; {st.session_state.last_transcript}</div>",
+            unsafe_allow_html=True,
+        )
+
+st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPLOAD FALLBACK
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("### 📂  Upload Audio File")
+st.caption("Test with any WAV · MP3 · M4A · FLAC file")
+
 uploaded = st.file_uploader(
-    "Upload a WAV/MP3 file to test",
+    "Upload audio",
     type=["wav", "mp3", "m4a", "flac"],
     label_visibility="collapsed",
 )
 
 if uploaded:
+    raw_bytes = uploaded.read()
+
+    # Always show player
+    st.audio(raw_bytes, format=f"audio/{uploaded.name.split('.')[-1]}")
+
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp.write(uploaded.read())
+        tmp.write(raw_bytes)
         tmp_path = tmp.name
 
-    st.audio(uploaded)
-
-    if USE_ML:
-        with st.spinner("Classifying audio directly ..."):
+    if USE_WHISPER_FT:
+        with st.spinner("Classifying with fine-tuned Whisper …"):
+            result = predict_whisper_from_file(tmp_path)
+    elif USE_ML:
+        with st.spinner("Classifying from audio …"):
             result = predict_from_file_direct(tmp_path)
-            cmd    = result["command"]
-            info   = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
-            conf   = result.get("confidence", 0.0)
-            transcript = result["transcript"]
     else:
         with st.spinner("Transcribing …"):
             transcript = transcribe(tmp_path)
-        
         result = match_command(transcript)
-        cmd    = result["command"]
-        info   = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
-        conf   = result.get("confidence", 0.0)
+        result["transcript"] = transcript
 
-    try:
-        os.unlink(tmp_path)
-    except:
-        pass
+    try: os.unlink(tmp_path)
+    except: pass
 
+    cmd    = result["command"]
+    info   = config.COMMAND_DISPLAY.get(cmd, config.COMMAND_DISPLAY["unknown"])
+    conf   = result.get("confidence", 0.0)
+    method = result.get("method", "")
+    card_class = "success" if cmd != "unknown" else "error"
+    color = info["color"]
     st.markdown(
-        f"<div class='transcript-box'>🗣️&nbsp;&nbsp;<em>{transcript}</em></div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f"<div class='result-card'>"
-        f"<div class='command-emoji'>{info['emoji']}</div>"
-        f"<div class='command-label' style='color:{info['color']};'>{info['label']}</div>"
-        f"<div class='command-sub'>Confidence: {conf*100:.0f}%  ·  Method: {result['method']}</div>"
+        f"<div class='result-card {card_class}'>"
+        f"  <div class='result-emoji'>{info['emoji']}</div>"
+        f"  <div class='result-info'>"
+        f"    <div class='result-label' style='color:{color};'>{info['label']}</div>"
+        f"    <div class='result-meta'>Confidence: {conf*100:.0f}% &nbsp;·&nbsp; Method: {method}</div>"
+        f"  </div>"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-# ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown("---")
+    if not USE_ML and result.get("transcript"):
+        st.markdown(
+            f"<div class='transcript-box'>🗣️ &nbsp; {result['transcript']}</div>",
+            unsafe_allow_html=True,
+        )
+
+# ── Footer ─────────────────────────────────────────────────────────────────────
+st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+model_tag = "MFCC + SVM" if USE_ML else "Whisper-base + String Match"
 st.markdown(
-    "<p style='text-align:center; color:#555; font-size:12px;'>"
-    "SMAI Assignment 3 · T11.3 Hindi Smart-Home Commands · Whisper-tiny (39M, CPU)"
-    "</p>",
+    f"<p style='text-align:center; color:#374151; font-size:11px;'>"
+    f"SMAI Assignment 3 &nbsp;·&nbsp; T11.3 &nbsp;·&nbsp; {model_tag}"
+    f"</p>",
     unsafe_allow_html=True,
 )

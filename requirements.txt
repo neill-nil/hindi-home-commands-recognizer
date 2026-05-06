@@ -1,8 +1,7 @@
 # Core ML / ASR
 openai-whisper>=20231117
-torch>=2.0.0         
-
-# Audio Classification (No Whisper)
+torch>=2.0.0
+transformers>=4.40,<5.0     # <5.0 to avoid vision models that require torchvision
 scikit-learn>=1.3.0
 librosa>=0.10.1
 joblib>=1.3.2
