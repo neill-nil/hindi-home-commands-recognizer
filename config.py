@@ -26,6 +26,8 @@ COMMANDS = [
     "ac_off",
     "tv_on",
     "tv_off",
+    "music_on",
+    "music_off",
 ]
 
 # ── Canonical Hindi phrases (what you'll say when recording) ──────────────────
@@ -39,6 +41,8 @@ CANONICAL_PHRASES = {
     "ac_off":    "AC बंद करो",
     "tv_on":     "TV चालू करो",
     "tv_off":    "TV बंद करो",
+    "music_on":  "गाना बजाओ",
+    "music_off": "गाना रोको",
 }
 
 # ── Keyword map for rule-based matching ───────────────────────────────────────
@@ -53,6 +57,8 @@ KEYWORD_MAP = {
     "ac_off":    (["ac", "AC", "एसी", "एयर कंडीशनर"],       ["बंद", "off"]),
     "tv_on":     (["tv", "TV", "टीवी", "टेलीविज़न"],         ["चालू", "on", "खोलो", "शुरू"]),
     "tv_off":    (["tv", "TV", "टीवी", "टेलीविज़न"],         ["बंद", "off"]),
+    "music_on":  (["गाना", "music", "song", "म्यूजिक", "गीत", "गाने"], ["बजाओ", "play", "चालू", "लगाओ", "शुरू", "चलाओ"]),
+    "music_off": (["गाना", "music", "song", "म्यूजिक", "गीत", "गाने"], ["रोको", "stop", "बंद", "ठहरो"]),
 }
 
 # ── Matcher thresholds ─────────────────────────────────────────────────────────
@@ -68,5 +74,7 @@ COMMAND_DISPLAY = {
     "ac_off":    {"emoji": "🔥", "label": "AC OFF",    "color": "#555555"},
     "tv_on":     {"emoji": "📺", "label": "TV ON",     "color": "#a060f0"},
     "tv_off":    {"emoji": "⏹️",  "label": "TV OFF",   "color": "#555555"},
+    "music_on":  {"emoji": "🎵", "label": "Music ON",  "color": "#ff3366"},
+    "music_off": {"emoji": "🔇", "label": "Music OFF", "color": "#555555"},
     "unknown":   {"emoji": "❓", "label": "Unknown",   "color": "#ff4444"},
 }
